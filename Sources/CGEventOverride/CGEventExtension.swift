@@ -25,7 +25,7 @@ extension CGEvent {
 }
 
 extension CGEventType {
-    enum Extra: UInt32 {
+    enum Extra: UInt32, Sendable {
         case gesture = 29
         case dockGesture = 30
         var cgEventType: CGEventType { CGEventType(rawValue: rawValue)! }
@@ -38,7 +38,7 @@ extension CGEventType {
 }
 
 extension CGEventField {
-    enum Extra: UInt32 {
+    enum Extra: UInt32, Sendable {
         case eventType = 50
         case windowNumber = 51
         case gestureType = 110
@@ -73,7 +73,7 @@ extension CGEventField {
     public static var scrollIsPartOfPan: CGEventField { extra(.scrollIsPartOfPan) }
 }
 
-public enum GestureType: Int64, CaseIterable {
+public enum GestureType: Int64, CaseIterable, Sendable {
     case null = 0
     case vendorDefined
     case button
@@ -111,7 +111,7 @@ public enum GestureType: Int64, CaseIterable {
     static var swipe: Self { .navigationSwipe }
 }
 
-public enum SwipeDirection: UInt64, CaseIterable {
+public enum SwipeDirection: UInt64, CaseIterable, Sendable {
     case none = 0x00000000
     case up = 0x00000001
     case down = 0x00000002
@@ -119,19 +119,19 @@ public enum SwipeDirection: UInt64, CaseIterable {
     case right = 0x00000008
 }
 
-public enum ZoomDirection: Int64, CaseIterable {
+public enum ZoomDirection: Int64, CaseIterable, Sendable {
     case none = 0
     case expand
     case contract
 }
 
-public enum RotateDirection: Int64, CaseIterable {
+public enum RotateDirection: Int64, CaseIterable, Sendable {
     case none = 0
     case clockwise = 2
     case counterClockwise = -2
 }
 
-public enum GestureMotion: UInt64, CaseIterable {
+public enum GestureMotion: UInt64, CaseIterable, Sendable {
     case none = 0
     case horizontal
     case vertical

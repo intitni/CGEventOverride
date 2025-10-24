@@ -1,6 +1,6 @@
 import Cocoa
 import Combine
-import CoreGraphics
+@preconcurrency import CoreGraphics
 import Foundation
 
 /// A hook of CGEvents.
@@ -17,8 +17,8 @@ public protocol CGEventHookType {
 }
 
 /// Defines how a CGEvent will be translated into, and what side effects will happen.
-public struct CGEventManipulation {
-    public enum Result {
+public struct CGEventManipulation: Sendable {
+    public enum Result: Sendable {
         case replaced(by: CGEvent)
         case discarded
         case unchanged
@@ -39,14 +39,14 @@ public struct CGEventManipulation {
     ///     If the event is to be canceled, nil should be returned.
     public init(
         eventsOfInterest: Set<CGEventType>,
-        convert: @escaping (CGEventTapProxy, CGEventType, CGEvent) -> Result
+        convert: @escaping @Sendable (CGEventTapProxy, CGEventType, CGEvent) -> Result
     ) {
         self.eventsOfInterest = eventsOfInterest
         self.convert = convert
     }
 
     let eventsOfInterest: Set<CGEventType>
-    let convert: (CGEventTapProxy, CGEventType, CGEvent) -> Result
+    let convert: @Sendable (CGEventTapProxy, CGEventType, CGEvent) -> Result
 }
 
 /// A hook receives disabling events.
@@ -60,14 +60,14 @@ func postIsDisabled() {
 }
 
 /// A hook of CGEvents.
-public final class CGEventHook: CGEventHookType {
+public final class CGEventHook: CGEventHookType, @unchecked Sendable {
     var port: CFMachPort?
     var allManipulations = [AnyHashable: CGEventManipulation]()
     var eventsOfInterest: Set<CGEventType>
     private var recoveryTimer: Timer?
     private var cancellable = [AnyCancellable]()
     public var isEnabled: Bool { port != nil }
-    let logger: (String) -> Void
+    let logger: @Sendable (String) -> Void
     let tapLocation: CGEventTapLocation
     let tapPlacement: CGEventTapPlacement
     let tapOptions: CGEventTapOptions
@@ -82,7 +82,7 @@ public final class CGEventHook: CGEventHookType {
         tapLocation: CGEventTapLocation = .cghidEventTap,
         tapPlacement: CGEventTapPlacement = .headInsertEventTap,
         tapOptions: CGEventTapOptions = .defaultTap,
-        logger: @escaping (String) -> Void = { _ in }
+        logger: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.eventsOfInterest = eventsOfInterest
         self.logger = logger

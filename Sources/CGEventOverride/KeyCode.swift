@@ -1,4 +1,4 @@
-public enum KeyboardCode: Int {
+public enum KeyboardCode: Int, Sendable {
     case returnKey = 0x24
     case enter = 0x4C
     case tab = 0x30

@@ -1,4 +1,4 @@
-public enum MouseCode: RawRepresentable {
+public enum MouseCode: RawRepresentable, Sendable {
     case mouseLeft
     case mouseRight
     case mouseMiddle

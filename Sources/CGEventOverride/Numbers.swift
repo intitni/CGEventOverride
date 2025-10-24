@@ -1,7 +1,7 @@
 import Foundation
 
 /// A 16.16 signed Int.
-public struct Int16d16 {
+public struct Int16d16: Sendable {
     private static let one: Int32 = 0x10000
     private static let doubleOne: Double = 0x10000
 
