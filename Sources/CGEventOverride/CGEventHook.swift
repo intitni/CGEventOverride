@@ -214,7 +214,7 @@ public final class CGEventHook: CGEventHookType, @unchecked Sendable {
 
             let allManipulations = hook.allManipulations
 
-            guard !allManipulations.isEmpty else { return nil }
+            guard !allManipulations.isEmpty else { return .passUnretained(event) }
 
             var result = CGEventManipulation.Result.unchanged
             for (_, man) in allManipulations

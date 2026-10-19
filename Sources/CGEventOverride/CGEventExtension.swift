@@ -57,7 +57,7 @@ extension CGEventField {
     }
 
     static func extra(_ field: Extra) -> CGEventField { field.cgEventField }
-    public static var windowNumber: CGEventField { extra(.eventType) }
+    public static var windowNumber: CGEventField { extra(.windowNumber) }
     public static var eventType: CGEventField { extra(.eventType) }
     public static var gestureType: CGEventField { extra(.gestureType) }
     public static var gestureValueX: CGEventField { extra(.gestureValueX) }
