@@ -52,10 +52,10 @@ public struct CGEventManipulation: Sendable {
 /// A hook receives disabling events.
 let hookIsDisabledNotification = Notification.Name("HookIsDisabled")
 
-func postIsDisabled() {
+func postIsDisabled(_ hook: CGEventHook) {
     NotificationCenter.default.post(
         name: hookIsDisabledNotification,
-        object: nil
+        object: hook
     )
 }
 
@@ -66,7 +66,10 @@ public final class CGEventHook: CGEventHookType, @unchecked Sendable {
     var eventsOfInterest: Set<CGEventType>
     private var recoveryTimer: Timer?
     private var cancellable = [AnyCancellable]()
-    public var isEnabled: Bool { port != nil }
+    public var isEnabled: Bool {
+        guard let port, CFMachPortIsValid(port) else { return false }
+        return CGEvent.tapIsEnabled(tap: port)
+    }
     let logger: @Sendable (String) -> Void
     let tapLocation: CGEventTapLocation
     let tapPlacement: CGEventTapPlacement
@@ -74,6 +77,9 @@ public final class CGEventHook: CGEventHookType, @unchecked Sendable {
 
     deinit {
         recoveryTimer?.invalidate()
+        if let port {
+            CFMachPortInvalidate(port)
+        }
     }
 
     /// Create a CGEventHook that listens into given event types.
@@ -92,22 +98,59 @@ public final class CGEventHook: CGEventHookType, @unchecked Sendable {
 
         NotificationCenter.default.publisher(for: hookIsDisabledNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.releasePort()
+            .sink { [weak self] notification in
+                guard let self, notification.object as? CGEventHook === self else { return }
+                self.recoverIfPossible()
             }.store(in: &cancellable)
     }
 
     public func deactivate() {
+        stopRecoveryTimer()
         guard let port else { return }
         logger("Deactivate.")
         CFMachPortInvalidate(port)
         self.port = nil
+    }
 
+    private func stopRecoveryTimer() {
         recoveryTimer?.invalidate()
         recoveryTimer = nil
     }
 
+    private func tryToEnablePort() -> Bool {
+        guard let port, AXIsProcessTrusted(), CFMachPortIsValid(port) else { return false }
+        logger("Trying to re-enable event tap.")
+        CGEvent.tapEnable(tap: port, enable: true)
+        guard CGEvent.tapIsEnabled(tap: port) else { return false }
+        logger("Event tap re-enabled.")
+        return true
+    }
+
+    private func recoverIfPossible() {
+        // Repeated disabled notifications must not restart the five-second window.
+        guard port != nil, recoveryTimer == nil else { return }
+        if tryToEnablePort() { return }
+
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            if self.tryToEnablePort() {
+                self.stopRecoveryTimer()
+            } else if ProcessInfo.processInfo.systemUptime >= deadline {
+                self.logger("Event tap could not be re-enabled within 5 seconds. Rebuilding.")
+                self.releasePort()
+                self.activateIfPossible()
+            }
+        }
+        recoveryTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
     func releasePort() {
+        stopRecoveryTimer()
         guard let port else { return }
         logger("Released.")
         CFMachPortInvalidate(port)
@@ -117,16 +160,19 @@ public final class CGEventHook: CGEventHookType, @unchecked Sendable {
     }
 
     func setupTimerToRetry() {
-        recoveryTimer?.invalidate()
-        recoveryTimer = Timer(timeInterval: 5, repeats: true) { [logger] timer in
-            logger("Trying to restart.")
-            if self.activateIfPossible() {
-                logger("Restarted.")
+        stopRecoveryTimer()
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] timer in
+            guard let self else {
                 timer.invalidate()
+                return
+            }
+            self.logger("Trying to restart.")
+            if self.activateIfPossible() {
+                self.logger("Restarted.")
             }
         }
-
-        RunLoop.current.add(recoveryTimer!, forMode: .common)
+        recoveryTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     @discardableResult
@@ -152,21 +198,21 @@ public final class CGEventHook: CGEventHookType, @unchecked Sendable {
             tapProxy: CGEventTapProxy,
             eventType: CGEventType,
             event: CGEvent,
-            allManipulationsRawPointer: UnsafeMutableRawPointer?
+            hookRawPointer: UnsafeMutableRawPointer?
         ) -> Unmanaged<CGEvent>? {
+            guard let hookRawPointer else { return .passUnretained(event) }
+            let hook = Unmanaged<CGEventHook>.fromOpaque(hookRawPointer).takeUnretainedValue()
             guard AXIsProcessTrusted() else {
-                postIsDisabled()
-                return .passRetained(event)
+                postIsDisabled(hook)
+                return .passUnretained(event)
             }
 
             if eventType == .tapDisabledByTimeout || eventType == .tapDisabledByUserInput {
-                postIsDisabled()
-                return .passRetained(event)
+                postIsDisabled(hook)
+                return .passUnretained(event)
             }
 
-            let allManipulations = allManipulationsRawPointer?
-                .assumingMemoryBound(to: [AnyHashable: CGEventManipulation].self)
-                .pointee ?? [:]
+            let allManipulations = hook.allManipulations
 
             guard !allManipulations.isEmpty else { return nil }
 
@@ -190,19 +236,18 @@ public final class CGEventHook: CGEventHookType, @unchecked Sendable {
         let tapPlacement = self.tapPlacement
         let tapOptions = self.tapOptions
 
-        guard let port = withUnsafeMutablePointer(to: &allManipulations, { pointer in
-            CGEvent.tapCreate(
-                tap: tapLocation,
-                place: tapPlacement,
-                options: tapOptions,
-                eventsOfInterest: eoi,
-                callback: callback,
-                userInfo: pointer
-            )
-        }) else {
+        guard let port = CGEvent.tapCreate(
+            tap: tapLocation,
+            place: tapPlacement,
+            options: tapOptions,
+            eventsOfInterest: eoi,
+            callback: callback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
             setupTimerToRetry()
             return false
         }
+        stopRecoveryTimer()
         logger("Activated.")
         self.port = port
         let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
